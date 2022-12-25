@@ -90,23 +90,25 @@ int main(void) {
 	freeaddrinfo(servinfo);
 
 	printf("listener: waiting to recvfrom...\n");
-	struct packet file_name;
-	addr_len = sizeof their_addr;
-	if ((numbytes = recvfrom(sockfd, &file_name, MAXBUFLEN - 1, 0,
-			(struct sockaddr*) &their_addr, &addr_len)) == -1) {
-		perror("recvfrom");
-		exit(1);
-	}
-	int status = 0;
-	if (!fork()) {
-		g_their_addr = their_addr;
-		g_addr_len = addr_len;
-		send_file(sockfd, file_name.data);
-		exit(0);
+	while (1) {
+		struct packet file_name;
+		addr_len = sizeof their_addr;
+		if ((numbytes = recvfrom(sockfd, &file_name, MAXBUFLEN - 1, 0,
+				(struct sockaddr*) &their_addr, &addr_len)) == -1) {
+			perror("recvfrom");
+			exit(1);
+		}
+		cout << "Server got new connection\n";
+		int status = 0;
+		if (!fork()) {
+			g_their_addr = their_addr;
+			g_addr_len = addr_len;
+			send_file(sockfd, file_name.data);
+			exit(0);
+		}
 	}
 	int returnStatus;
 	waitpid(0, &returnStatus, 0);
-	shutdown(sockfd, SHUT_RDWR);
 	return 0;
 }
 
@@ -139,26 +141,21 @@ void send_file(int sockfd, char *path) {
 	int nb = fread(send_buffer, 1, 500, fileptr);
 	sent_packet = create_packet(send_buffer, nb);
 
-	int i = 0;
 	while (!feof(fileptr)) {
 		send_packet(sockfd, sent_packet);
 		nb = fread(send_buffer, 1, 500, fileptr);
 		sent_packet = create_packet(send_buffer, nb);
-		i++;
 	}
 
 	send_packet(sockfd, sent_packet);
 	sent_packet = { 0, 0, 0, "" };
 	send_packet(sockfd, sent_packet);
-	i++;
-	cout << i << "\n";
 	return;
 }
 
 packet create_packet(char data[], int size) {
 	struct packet pack;
 	memcpy(pack.data, data, size);
-	cout << size << "\n";
 	pack.len = size + 8;
 	return pack;
 }
