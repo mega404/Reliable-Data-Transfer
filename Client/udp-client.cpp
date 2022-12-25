@@ -11,11 +11,30 @@
 #include <netdb.h>
 using namespace std;
 
-void read_input_file(char *path, char args[][1024]);
+#define MAXBUFLEN 508
 char host[] = "localhost";
 char server_port[] = "4950";
 
+struct packet {
+	uint16_t check_sum;
+	uint16_t len;
+	uint32_t seqno;
+	char data[500];
+};
+
+struct ack_packet {
+	uint16_t check_sum;
+	uint16_t len;
+	uint32_t ackno;
+};
+
+void read_input_file(char *path, char args[][1024]);
+packet create_packet(char *data);
+void get_file_name(char *path, char *file_name);
+void receive_file(int sockfd, char *file);
+
 int main(void) {
+	char file_name[20] = "";
 	char argv[3][1024];
 	char path[] = "input.in";
 	read_input_file(path, argv);
@@ -48,16 +67,19 @@ int main(void) {
 		fprintf(stderr, "talker: failed to create socket\n");
 		return 2;
 	}
+	struct packet file = create_packet(argv[2]);
 
-	if ((numbytes = sendto(sockfd, argv[2], strlen(argv[2]), 0, p->ai_addr,
+	if ((numbytes = sendto(sockfd, &file, sizeof(file), 0, p->ai_addr,
 			p->ai_addrlen)) == -1) {
 		perror("talker: sendto");
 		exit(1);
 	}
 
-	printf("talker: sent %d bytes to %s\n", numbytes, argv[1]);
+	printf("talker: sent %d bytes to %s\n", file.len, argv[1]);
+	get_file_name(argv[2], file_name);
+	cout << "Extracted file name: " << file_name << "\n";
+	receive_file(sockfd, file_name);
 	close(sockfd);
-
 	return 0;
 }
 
@@ -75,4 +97,58 @@ void read_input_file(char *path, char args[][1024]) {
 	}
 
 	fclose(filePointer);
+}
+
+packet create_packet(char *data) {
+	struct packet pack;
+	strcpy(pack.data, data);
+	pack.len = strlen(data) + 8;
+	return pack;
+}
+
+void receive_file(int sockfd, char *file) {
+	printf("Reading Data\n");
+	struct sockaddr_storage their_addr;
+	socklen_t addr_len;
+	addr_len = sizeof their_addr;
+
+	int size = 500;
+	int numbytes;
+	char p_array[size];
+	struct packet received_data;
+	FILE *recievedFile = fopen(file, "wb");
+
+	if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
+			(struct sockaddr*) &their_addr, &addr_len)) == -1) {
+		perror("recvfrom");
+		exit(1);
+	}
+	while (1) {
+		if (received_data.len == 0)
+			break;
+		fwrite(received_data.data, sizeof(char), received_data.len - 8,
+				recievedFile);
+
+		if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
+				(struct sockaddr*) &their_addr, &addr_len)) == -1) {
+			perror("recvfrom");
+			exit(1);
+		}
+	}
+	fclose(recievedFile);
+	printf("Finished reading\n");
+	fflush(stdout);
+}
+
+void get_file_name(char *path, char *file_name) {
+	char parsed[100][1024];
+	char *token;
+	char *rest = path;
+	int i = 0;
+
+	while ((token = strtok_r(rest, "\\", &rest))) {
+		strcpy(parsed[i], token);
+		i++;
+	}
+	strcpy(file_name, parsed[i - 1]);
 }

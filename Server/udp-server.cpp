@@ -9,9 +9,13 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/wait.h>
+#include <cstdio>
 using namespace std;
 #define MYPORT "4950"    // the port users will be connecting to
-#define MAXBUFLEN 100
+#define MAXBUFLEN 509
+struct sockaddr_storage g_their_addr;
+socklen_t g_addr_len;
 
 struct packet {
 	uint16_t check_sum;
@@ -27,6 +31,9 @@ struct ack_packet {
 };
 
 void read_input_file(char *path, char args[][1024]);
+void send_file(int new_fd, char *path);
+packet create_packet(char data[], int size);
+void send_packet(int sockfd, struct packet sent_packet);
 
 // get sockaddr, IPv4 or IPv6:
 void* get_in_addr(struct sockaddr *sa) {
@@ -46,7 +53,6 @@ int main(void) {
 	int rv;
 	int numbytes;
 	struct sockaddr_storage their_addr;
-	char buf[MAXBUFLEN];
 	socklen_t addr_len;
 	char s[INET6_ADDRSTRLEN];
 
@@ -84,28 +90,23 @@ int main(void) {
 	freeaddrinfo(servinfo);
 
 	printf("listener: waiting to recvfrom...\n");
-
+	struct packet file_name;
 	addr_len = sizeof their_addr;
-	if ((numbytes = recvfrom(sockfd, buf, MAXBUFLEN - 1, 0,
+	if ((numbytes = recvfrom(sockfd, &file_name, MAXBUFLEN - 1, 0,
 			(struct sockaddr*) &their_addr, &addr_len)) == -1) {
 		perror("recvfrom");
 		exit(1);
 	}
-	buf[numbytes] = '\0';
+	int status = 0;
 	if (!fork()) {
-		printf("listener: got packet from %s\n",
-				inet_ntop(their_addr.ss_family,
-						get_in_addr((struct sockaddr*) &their_addr), s,
-						sizeof s));
-		printf("listener: packet is %d bytes long\n", numbytes);
-		buf[numbytes] = '\0';
-		printf("listener: packet contains \"%s\"\n", buf);
-		///////////////////////
-
-		//////////////////////
+		g_their_addr = their_addr;
+		g_addr_len = addr_len;
+		send_file(sockfd, file_name.data);
 		exit(0);
 	}
-	close(sockfd);
+	int returnStatus;
+	waitpid(0, &returnStatus, 0);
+	shutdown(sockfd, SHUT_RDWR);
 	return 0;
 }
 
@@ -125,3 +126,48 @@ void read_input_file(char *path, char args[][1024]) {
 	fclose(filePointer);
 }
 
+void send_file(int sockfd, char *path) {
+	FILE *fileptr;
+	long filelen;
+	int numbytes;
+	struct packet sent_packet;
+	fileptr = fopen(path, "rb");  // Open the file in binary mode
+	fseek(fileptr, 0, SEEK_END);          // Jump to the end of the file
+	filelen = ftell(fileptr);         // Get the current byte offset in the file
+	rewind(fileptr);
+	char send_buffer[500]; // no link between BUFSIZE and the file size
+	int nb = fread(send_buffer, 1, 500, fileptr);
+	sent_packet = create_packet(send_buffer, nb);
+
+	int i = 0;
+	while (!feof(fileptr)) {
+		send_packet(sockfd, sent_packet);
+		nb = fread(send_buffer, 1, 500, fileptr);
+		sent_packet = create_packet(send_buffer, nb);
+		i++;
+	}
+
+	send_packet(sockfd, sent_packet);
+	sent_packet = { 0, 0, 0, "" };
+	send_packet(sockfd, sent_packet);
+	i++;
+	cout << i << "\n";
+	return;
+}
+
+packet create_packet(char data[], int size) {
+	struct packet pack;
+	memcpy(pack.data, data, size);
+	cout << size << "\n";
+	pack.len = size + 8;
+	return pack;
+}
+
+void send_packet(int sockfd, struct packet sent_packet) {
+	int numbytes;
+	if ((numbytes = sendto(sockfd, &sent_packet, sizeof(sent_packet), 0,
+			(struct sockaddr*) &g_their_addr, g_addr_len)) == -1) {
+		perror("talker: sendto");
+		exit(1);
+	}
+}
