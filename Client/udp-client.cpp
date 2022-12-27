@@ -32,6 +32,7 @@ void read_input_file(char *path, char args[][1024]);
 packet create_packet(char *data);
 void get_file_name(char *path, char *file_name);
 void receive_file(int sockfd, char *file);
+ack_packet create_Ack_packet(int ack_no);
 
 int main(void) {
 	char file_name[20] = "";
@@ -129,6 +130,15 @@ void receive_file(int sockfd, char *file) {
 		fwrite(received_data.data, sizeof(char), received_data.len - 8,
 				recievedFile);
 
+        cout<<"recieved packet no : "<<received_data.seqno<<endl;
+        /*ack_packet ackPacket = create_Ack_packet(received_data.seqno+1);
+        if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
+                               (struct sockaddr*) &their_addr, addr_len)) == -1) {
+            perror("talker: sendto");
+            exit(1);
+        }
+
+        cout<<"sent Ack packet no : "<<ackPacket.ackno<<endl;*/
 		if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
 				(struct sockaddr*) &their_addr, &addr_len)) == -1) {
 			perror("recvfrom");
@@ -151,4 +161,11 @@ void get_file_name(char *path, char *file_name) {
 		i++;
 	}
 	strcpy(file_name, parsed[i - 1]);
+}
+
+ack_packet create_Ack_packet(int ack_no) {
+    struct ack_packet pack;
+    pack.len = 8;
+    pack.ackno = ack_no;
+    return pack;
 }

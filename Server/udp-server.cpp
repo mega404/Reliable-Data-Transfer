@@ -11,9 +11,16 @@
 #include <netdb.h>
 #include <sys/wait.h>
 #include <cstdio>
+#include <vector>
+#include <random>
+#include <math.h>
+#include <sstream>
+
 using namespace std;
 #define MYPORT "4950"    // the port users will be connecting to
 #define MAXBUFLEN 509
+
+
 struct sockaddr_storage g_their_addr;
 socklen_t g_addr_len;
 
@@ -30,8 +37,20 @@ struct ack_packet {
 	uint32_t ackno;
 };
 
+vector<packet> filePackets;
+
+//0 is for slowStart
+//1 is for cognestion avoidance
+//2 is for Fast recovery
+int state = 0;
+
+int cwnSize = 1;
+int ssthreshold = 63;
+
+//int timerArary[] = new timerArray[cwnSize];
+
 void read_input_file(char *path, char args[][1024]);
-void send_file(int new_fd, char *path);
+void create_file_packets(int sockfd, char *path);
 packet create_packet(char data[], int size);
 void send_packet(int sockfd, struct packet sent_packet);
 
@@ -55,6 +74,15 @@ int main(void) {
 	struct sockaddr_storage their_addr;
 	socklen_t addr_len;
 	char s[INET6_ADDRSTRLEN];
+
+    int seed = stoi(argv[1]);
+    mt19937 gen(seed);
+
+    //cout << "arg 3 is " <<argv[2]<<endl;
+    float plp = stof(argv[2]);
+    //istringstream(argv[3]) >> plp;
+    cout<<"plp is "<<plp<<endl;
+    //srand(seed);
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_INET6; // set to AF_INET to use IPv4
@@ -103,7 +131,66 @@ int main(void) {
 		if (!fork()) {
 			g_their_addr = their_addr;
 			g_addr_len = addr_len;
-			send_file(sockfd, file_name.data);
+            create_file_packets(sockfd, file_name.data);
+            int packetCounter=0;
+            uniform_real_distribution<> dis(0,1);
+            while(packetCounter < filePackets.size()) {
+                int remained_size =  (filePackets.size()-packetCounter);
+                //int ackToRecieve[cwnSize];
+                //int ackCounter = 0;
+
+                for (int i=0; i<min(cwnSize, remained_size); i++) {
+                    filePackets[packetCounter].seqno = packetCounter;
+
+                    float propToSend = dis(gen);
+
+                    //cout<<"propToSend : "<<propToSend<<endl;
+                    if(propToSend > plp) {
+                        cout << "packet sent : " << filePackets[packetCounter].seqno << endl;
+                        send_packet(sockfd, filePackets[packetCounter]);
+                    }
+                    struct ack_packet received_ack;
+                    /*if ((numbytes = recvfrom(sockfd, &received_ack, MAXBUFLEN, 0,
+                                             (struct sockaddr*) &their_addr, &addr_len)) == -1) {
+                        perror("recvfrom");
+                        exit(1);
+                    }
+                    cout<<"Ack recived : "<<received_ack.ackno<<endl;*/
+                    /*if (received_ack.ackno == filePackets[packetCounter].seqno+1) {
+                        //ackCounter2++;
+                        cout<<"Ack recived : "<<received_ack.ackno<<endl;
+                        //continue;
+                    }*/
+                    packetCounter++;
+                    //ackToRecieve[ackCounter] = packetCounter;
+                    //ackCounter++;
+                }
+
+                /*int ackCounter2=0;
+                for (int i=0; i<ackCounter; i++){
+                    struct ack_packet received_ack;
+                    if ((numbytes = recvfrom(sockfd, &received_ack, MAXBUFLEN, 0,
+                                             (struct sockaddr*) &their_addr, &addr_len)) == -1) {
+                        perror("recvfrom");
+                        exit(1);
+                    }
+                    if (received_ack.ackno == ackToRecieve[ackCounter2]) {
+                        ackCounter2++;
+                        cout<<"Ack recived : "<<received_ack.ackno<<endl;
+                        //continue;
+                    }
+                }*/
+
+                cout<<"cwinSIZE is " << cwnSize << endl;
+                if (state == 0) {
+                    cwnSize *= 2;
+                }else {
+                    cwnSize += 1;
+                }
+                if (cwnSize >= ssthreshold) state = 1;
+            }
+            cout<<"Finished sending file "<<endl;
+
 			exit(0);
 		}
 	}
@@ -128,28 +215,28 @@ void read_input_file(char *path, char args[][1024]) {
 	fclose(filePointer);
 }
 
-void send_file(int sockfd, char *path) {
+void create_file_packets(int sockfd, char *path) {
 	FILE *fileptr;
 	long filelen;
 	int numbytes;
-	struct packet sent_packet;
+	struct packet file_packet;
 	fileptr = fopen(path, "rb");  // Open the file in binary mode
 	fseek(fileptr, 0, SEEK_END);          // Jump to the end of the file
 	filelen = ftell(fileptr);         // Get the current byte offset in the file
 	rewind(fileptr);
 	char send_buffer[500]; // no link between BUFSIZE and the file size
 	int nb = fread(send_buffer, 1, 500, fileptr);
-	sent_packet = create_packet(send_buffer, nb);
+	file_packet = create_packet(send_buffer, nb);
 
 	while (!feof(fileptr)) {
-		send_packet(sockfd, sent_packet);
+        filePackets.push_back(file_packet);
 		nb = fread(send_buffer, 1, 500, fileptr);
-		sent_packet = create_packet(send_buffer, nb);
+        file_packet = create_packet(send_buffer, nb);
 	}
 
-	send_packet(sockfd, sent_packet);
-	sent_packet = { 0, 0, 0, "" };
-	send_packet(sockfd, sent_packet);
+    filePackets.push_back(file_packet);
+    file_packet = { 0, 0, 0, "" };
+    filePackets.push_back(file_packet);
 	return;
 }
 
