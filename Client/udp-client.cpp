@@ -190,6 +190,7 @@ void get_file_name(char *path, char *file_name) {
 		strcpy(parsed[i], token);
 		i++;
 	}
+    cout<<"last element is : "<<parsed[i-1]<<endl;
 	strcpy(file_name, parsed[i - 1]);
 }
 

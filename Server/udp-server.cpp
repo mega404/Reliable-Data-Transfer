@@ -15,10 +15,13 @@
 #include <random>
 #include <math.h>
 #include <sstream>
+#include <chrono>
+#include <sys/poll.h>
 
 using namespace std;
 #define MYPORT "4950"    // the port users will be connecting to
 #define MAXBUFLEN 509
+#define TimeToWaitForPacket 2
 
 struct packet {
 	uint16_t check_sum;
@@ -52,7 +55,8 @@ void read_input_file(char *path, char args[][1024]);
 void create_file_packets(char *path);
 packet create_packet(char data[], int size);
 void send_packet(struct packet sent_packet);
-void send_file();
+bool recieve_ack_packet();
+void send_file_stop_and_wait();
 
 // get sockaddr, IPv4 or IPv6:
 void* get_in_addr(struct sockaddr *sa) {
@@ -89,6 +93,9 @@ int main(void) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return 1;
 	}
+    struct timeval timeout;
+    timeout.tv_sec = 3;
+    timeout.tv_usec = 0;
 
 	// loop through all the results and bind to the first we can
 	for (p = servinfo; p != NULL; p = p->ai_next) {
@@ -98,6 +105,11 @@ int main(void) {
 			continue;
 		}
 
+        if (setsockopt(sockfd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout)) < 0){
+            perror("failed allowing server socket to reuse address");
+        }
+        //setsockopt(sockfd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
+
 		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
 			close(sockfd);
 			perror("listener: bind");
@@ -106,6 +118,8 @@ int main(void) {
 
 		break;
 	}
+
+
 
 	if (p == NULL) {
 		fprintf(stderr, "listener: failed to bind socket\n");
@@ -129,7 +143,8 @@ int main(void) {
 		g_their_addr = their_addr;
 		g_addr_len = addr_len;
 		create_file_packets(file_name.data);
-		send_file();
+        //cout<<"file packets length is : "<<filePackets.size()<<endl;
+        send_file_stop_and_wait();
 		exit(0);
 	}
 	/*}*/
@@ -138,16 +153,11 @@ int main(void) {
 	return 0;
 }
 
-void send_file() {
+void send_file_stop_and_wait() {
+    cout<<"iam here "<<endl;
 	uniform_real_distribution<> dis(0, 1);
 	mt19937 gen(seed);
-	float propToSend = dis(gen);
-	/*
-	 //cout<<"propToSend : "<<propToSend<<endl;
-	 if (propToSend > plp) {
-	 cout << "packet sent : " << filePackets[packetCounter].seqno << endl;
-	 send_packet(filePackets[packetCounter]);
-	 }*/
+	//float propToSend = dis(gen);
 	char empty[] = "";
 	// This packet contains number of packets will the
 	// Client receive
@@ -156,68 +166,37 @@ void send_file() {
 	send_packet(p);
 
 	int packetCounter = 0;
-	/*int packetNum = 0;
-	 while (packetNum < filePackets.size()) {
-	 filePackets[packetNum].seqno = packetNum;
-	 send_packet(filePackets[packetNum]);
-	 packetNum++;
-	 }*/
 	while (packetCounter < filePackets.size()) {
+        //cout<<"iam in while loop"<<endl;
 		int remained_size = (filePackets.size() - packetCounter);
 		//int ackToRecieve[cwnSize];
 		//int ackCounter = 0;
 
 		for (int i = 0; i < min(cwnSize, remained_size); i++) {
+            //cout<<"iam in for loop"<<endl;
 			filePackets[packetCounter].seqno = packetCounter;
 
-			float propToSend = dis(gen);
-
-			//cout<<"propToSend : "<<propToSend<<endl;
-			if (propToSend > plp) {
-				cout << "packet sent : " << filePackets[packetCounter].seqno
-						<< endl;
-				send_packet(filePackets[packetCounter]);
-			}
-			struct ack_packet received_ack;
-			/*if ((numbytes = recvfrom(sockfd, &received_ack, MAXBUFLEN, 0,
-			 (struct sockaddr*) &their_addr, &addr_len)) == -1) {
-			 perror("recvfrom");
-			 exit(1);
-			 }
-			 cout<<"Ack recived : "<<received_ack.ackno<<endl;*/
-			/*if (received_ack.ackno == filePackets[packetCounter].seqno+1) {
-			 //ackCounter2++;
-			 cout<<"Ack recived : "<<received_ack.ackno<<endl;
-			 //continue;
-			 }*/
+            bool timeout = true;
+            while (timeout) {
+                float propToSend = dis(gen);
+                //cout<<"propToSend : "<<propToSend<<endl;
+                if (propToSend > plp) {
+                    cout << "packet sent : " << filePackets[packetCounter].seqno<< endl;
+                    send_packet(filePackets[packetCounter]);
+                }else {
+                    cout<<"packet dropped"<<endl;
+                }
+                timeout = recieve_ack_packet();
+            }
 			packetCounter++;
-			//ackToRecieve[ackCounter] = packetCounter;
-			//ackCounter++;
 		}
-
-		/*int ackCounter2=0;
-		 for (int i=0; i<ackCounter; i++){
-		 struct ack_packet received_ack;
-		 if ((numbytes = recvfrom(sockfd, &received_ack, MAXBUFLEN, 0,
-		 (struct sockaddr*) &their_addr, &addr_len)) == -1) {
-		 perror("recvfrom");
-		 exit(1);
-		 }
-		 if (received_ack.ackno == ackToRecieve[ackCounter2]) {
-		 ackCounter2++;
-		 cout<<"Ack recived : "<<received_ack.ackno<<endl;
-		 //continue;
-		 }
-		 }*/
-
 		cout << "cwinSIZE is " << cwnSize << endl;
 		if (state == 0) {
 			cwnSize *= 2;
 		} else {
 			cwnSize += 1;
 		}
-		if (cwnSize >= ssthreshold)
-			state = 1;
+		if (cwnSize >= ssthreshold) state = 1;
 	}
 	cout << "Finished sending file " << endl;
 }
@@ -244,6 +223,7 @@ void create_file_packets(char *path) {
 	int numbytes;
 	struct packet file_packet;
 	fileptr = fopen(path, "rb");  // Open the file in binary mode
+    cout<<"iam here and fileptr is : "<<fileptr<<endl;
 	fseek(fileptr, 0, SEEK_END);          // Jump to the end of the file
 	filelen = ftell(fileptr);         // Get the current byte offset in the file
 	rewind(fileptr);
@@ -277,4 +257,25 @@ void send_packet(struct packet sent_packet) {
 		perror("talker: sendto");
 		exit(1);
 	}
+}
+
+bool recieve_ack_packet() {
+    struct ack_packet received_ack;
+
+    //auto start = std::chrono::system_clock::now();
+    //while (std::chrono::duration<double>(std::chrono::system_clock::now() - start) < std::chrono::duration<double>(TimeToWaitForPacket)) {
+    struct pollfd pfd = {.fd = sockfd, .events = POLLIN};
+    int state = poll(&pfd, 1, TimeToWaitForPacket*1000);
+    recvfrom(sockfd, &received_ack, MAXBUFLEN, 0,
+    (struct sockaddr *) &g_their_addr, &g_addr_len);
+    /*if (numbytes  == -1) {
+        perror("recvfrom");
+        exit(1);
+    }*/
+
+    if (state != 0){
+        cout << "Ack recived : " << received_ack.ackno << endl;
+        return false;
+    }
+    return true;
 }
