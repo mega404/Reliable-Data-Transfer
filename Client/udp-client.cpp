@@ -9,12 +9,17 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <fstream>
+#include <cstring>
+#include <string>
 using namespace std;
 
 #define MAXBUFLEN 508
 char host[] = "localhost";
 char server_port[] = "4950";
-
+int sockfd;
+struct sockaddr_storage g_their_addr;
+socklen_t g_addr_len;
 struct packet {
 	uint16_t check_sum;
 	uint16_t len;
@@ -31,15 +36,17 @@ struct ack_packet {
 void read_input_file(char *path, char args[][1024]);
 packet create_packet(char *data);
 void get_file_name(char *path, char *file_name);
-void receive_file(int sockfd, char *file);
+void receive_file(char *file);
 ack_packet create_Ack_packet(int ack_no);
+void send_ack(ack_packet ack);
 
 int main(void) {
 	char file_name[20] = "";
 	char argv[3][1024];
 	char path[] = "input.in";
 	read_input_file(path, argv);
-	int sockfd;
+	/*	int sockfd;*/
+	g_addr_len = sizeof g_their_addr;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	int numbytes;
@@ -79,7 +86,7 @@ int main(void) {
 	printf("talker: sent %d bytes to %s\n", file.len, argv[1]);
 	get_file_name(argv[2], file_name);
 	cout << "Extracted file name: " << file_name << "\n";
-	receive_file(sockfd, file_name);
+	receive_file(file_name);
 	close(sockfd);
 	return 0;
 }
@@ -107,45 +114,68 @@ packet create_packet(char *data) {
 	return pack;
 }
 
-void receive_file(int sockfd, char *file) {
+void receive_file(char *file) {
 	printf("Reading Data\n");
-	struct sockaddr_storage their_addr;
-	socklen_t addr_len;
-	addr_len = sizeof their_addr;
-
 	int size = 500;
 	int numbytes;
 	char p_array[size];
 	struct packet received_data;
-	FILE *recievedFile = fopen(file, "wb");
-
+	int expected_seqno = 1;
+	ack_packet ackPacket;
 	if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
-			(struct sockaddr*) &their_addr, &addr_len)) == -1) {
+			(struct sockaddr*) &g_their_addr, &g_addr_len)) == -1) {
 		perror("recvfrom");
 		exit(1);
 	}
+
+	// This array to hold packets in place according to packet seqno
+	// 					Important
+	// client will receive the last package as zero to stop
+	// this will be the last package in received_data[]
+	// write received_data[]  except the last one.
+	packet received_packets[received_data.seqno - 1];
+	int n = received_data.seqno;
+	cout << "Num of packets will be received " << received_data.seqno << "\n";
+	int ack = 0;
 	while (1) {
 		if (received_data.len == 0)
 			break;
-		fwrite(received_data.data, sizeof(char), received_data.len - 8,
-				recievedFile);
-
-        cout<<"recieved packet no : "<<received_data.seqno<<endl;
-        /*ack_packet ackPacket = create_Ack_packet(received_data.seqno+1);
-        if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
-                               (struct sockaddr*) &their_addr, addr_len)) == -1) {
-            perror("talker: sendto");
-            exit(1);
-        }
-
-        cout<<"sent Ack packet no : "<<ackPacket.ackno<<endl;*/
 		if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
-				(struct sockaddr*) &their_addr, &addr_len)) == -1) {
+				(struct sockaddr*) &g_their_addr, &g_addr_len)) == -1) {
 			perror("recvfrom");
 			exit(1);
 		}
+		received_packets[received_data.seqno] = received_data;
+		cout << "recieved packet no : " << received_data.seqno << "\n";
+		ack = received_data.seqno;
+		ackPacket = create_Ack_packet(ack);
+		send_ack(ackPacket);
+		cout << "sent Ack packet no : " << ackPacket.ackno << "\n";
 	}
+	/*here you should write received_packets to file*/
+
+	FILE *recievedFile = fopen(file, "wb");
+	for (int i = 0; i < n - 1; i++) {
+		/*const char *c = received_packets[i].c_str();*/
+		fwrite(received_packets[i].data, sizeof(char),
+				received_packets[i].len - 8, recievedFile);
+	}
+
 	fclose(recievedFile);
+	/*	ofstream wf(file, ios::out | ios::binary);
+	 if (!wf.is_open()) {
+	 cout << "error" << endl;
+	 return;
+	 }
+	 for (int i = 0; i < n - 1; i++) {
+	 // If strings are null-terminated use +1 to separate them in file
+	 const char *c = ;
+	 wf.write(c, 500);
+	 my_file.write(&received_packets[i], received_packets[i].length());
+	 // If strings aren't null-terminated write a null symbol after string
+	 // my_file.write("\0", 1);
+	 }
+	 wf.close();*/
 	printf("Finished reading\n");
 	fflush(stdout);
 }
@@ -164,8 +194,17 @@ void get_file_name(char *path, char *file_name) {
 }
 
 ack_packet create_Ack_packet(int ack_no) {
-    struct ack_packet pack;
-    pack.len = 8;
-    pack.ackno = ack_no;
-    return pack;
+	struct ack_packet pack;
+	pack.len = 8;
+	pack.ackno = ack_no;
+	return pack;
+}
+
+void send_ack(ack_packet ackPacket) {
+	int numbytes;
+	if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
+			(struct sockaddr*) &g_their_addr, g_addr_len)) == -1) {
+		perror("talker: sendto");
+		exit(1);
+	}
 }
