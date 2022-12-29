@@ -37,9 +37,9 @@ struct ack_packet {
 };
 
 vector<packet> filePackets;
-struct sockaddr_storage g_their_addr;
+struct sockaddr_in g_their_addr;
 socklen_t g_addr_len;
-int sockfd;
+int clientsock;
 //0 is for slowStart
 //1 is for congestion avoidance
 //2 is for Fast recovery
@@ -58,103 +58,85 @@ void send_packet(struct packet sent_packet);
 bool recieve_ack_packet();
 void send_file_stop_and_wait();
 
-// get sockaddr, IPv4 or IPv6:
-void* get_in_addr(struct sockaddr *sa) {
-	if (sa->sa_family == AF_INET) {
-		return &(((struct sockaddr_in*) sa)->sin_addr);
-	}
+/*// get sockaddr, IPv4 or IPv6:
+ void* get_in_addr(struct sockaddr *sa) {
+ if (sa->sa_family == AF_INET) {
+ return &(((struct sockaddr_in*) sa)->sin_addr);
+ }
 
-	return &(((struct sockaddr_in6*) sa)->sin6_addr);
-}
+ return &(((struct sockaddr_in6*) sa)->sin6_addr);
+ }*/
 
 int main(void) {
 	char argv[3][1024];
 	char path[] = "input.in";
 	read_input_file(path, argv);
-	struct addrinfo hints, *servinfo, *p;
+	int sockfd;
+	struct sockaddr_in client, server;
 	int rv;
 	int numbytes;
-	struct sockaddr_storage their_addr;
-	socklen_t addr_len;
-	char s[INET6_ADDRSTRLEN];
 	seed = stoi(argv[1]);
-
-	//cout << "arg 3 is " <<argv[2]<<endl;
 	plp = stof(argv[2]);
-	//istringstream(argv[3]) >> plp;
 	cout << "plp is " << plp << endl;
-	//srand(seed);
 
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_INET6; // set to AF_INET to use IPv4
-	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_flags = AI_PASSIVE; // use my IP
-	if ((rv = getaddrinfo(NULL, argv[0], &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-		return 1;
+	sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+	if (sockfd < 0) {
+		printf("Error while creating socket\n");
+		return -1;
 	}
-    struct timeval timeout;
-    timeout.tv_sec = 3;
-    timeout.tv_usec = 0;
+	printf("Socket created successfully\n");
 
-	// loop through all the results and bind to the first we can
-	for (p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
-				== -1) {
-			perror("listener: socket");
-			continue;
-		}
+	// Set port and IP:
+	server.sin_family = AF_INET;
+	server.sin_port = htons(4950);
+	server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-        if (setsockopt(sockfd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout)) < 0){
-            perror("failed allowing server socket to reuse address");
-        }
-        //setsockopt(sockfd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
-
-		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-			close(sockfd);
-			perror("listener: bind");
-			continue;
-		}
-
-		break;
+	// Bind to the set port and IP:
+	if (bind(sockfd, (struct sockaddr*) &server, sizeof(server)) < 0) {
+		printf("Couldn't bind to the port\n");
+		return -1;
 	}
-
-
-
-	if (p == NULL) {
-		fprintf(stderr, "listener: failed to bind socket\n");
-		return 2;
-	}
-
-	freeaddrinfo(servinfo);
+	printf("Done with binding\n");
 
 	printf("listener: waiting to recvfrom...\n");
-	/*while (1) {*/
-	struct packet file_name;
-	addr_len = sizeof their_addr;
-	if ((numbytes = recvfrom(sockfd, &file_name, MAXBUFLEN - 1, 0,
-			(struct sockaddr*) &their_addr, &addr_len)) == -1) {
-		perror("recvfrom");
-		exit(1);
+	while (1) {
+		struct packet file_name;
+		int len = sizeof(client);
+		if (recvfrom(sockfd, &file_name, MAXBUFLEN, 0,
+				(struct sockaddr*) &client, &len) < 0) {
+			printf("Couldn't receive\n");
+			return -1;
+		}
+		cout << "Server got new connection\n";
+		int status = 0;
+		if (!fork()) {
+			g_their_addr = client;
+			g_addr_len = sizeof(client);
+			struct timeval timeout;
+			timeout.tv_sec = 3;
+			timeout.tv_usec = 0;
+			if ((clientsock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+				printf("Error while creating socket\n");
+				return -1;
+			}
+			if (setsockopt(clientsock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+					sizeof(timeout)) < 0) {
+				perror("failed allowing server socket to reuse address");
+			}
+			create_file_packets(file_name.data);
+			//cout<<"file packets length is : "<<filePackets.size()<<endl;
+			send_file_stop_and_wait();
+			exit(0);
+		}
 	}
-	cout << "Server got new connection\n";
-	int status = 0;
-	if (!fork()) {
-		g_their_addr = their_addr;
-		g_addr_len = addr_len;
-		create_file_packets(file_name.data);
-        //cout<<"file packets length is : "<<filePackets.size()<<endl;
-        send_file_stop_and_wait();
-		exit(0);
-	}
-	/*}*/
 	int returnStatus;
 	waitpid(0, &returnStatus, 0);
 	return 0;
 }
 
 void send_file_stop_and_wait() {
-    cout<<"iam here "<<endl;
+	cout << "iam here " << endl;
 	uniform_real_distribution<> dis(0, 1);
 	mt19937 gen(seed);
 	//float propToSend = dis(gen);
@@ -167,27 +149,28 @@ void send_file_stop_and_wait() {
 
 	int packetCounter = 0;
 	while (packetCounter < filePackets.size()) {
-        //cout<<"iam in while loop"<<endl;
+		//cout<<"iam in while loop"<<endl;
 		int remained_size = (filePackets.size() - packetCounter);
 		//int ackToRecieve[cwnSize];
 		//int ackCounter = 0;
 
 		for (int i = 0; i < min(cwnSize, remained_size); i++) {
-            //cout<<"iam in for loop"<<endl;
+			//cout<<"iam in for loop"<<endl;
 			filePackets[packetCounter].seqno = packetCounter;
 
-            bool timeout = true;
-            while (timeout) {
-                float propToSend = dis(gen);
-                //cout<<"propToSend : "<<propToSend<<endl;
-                if (propToSend > plp) {
-                    cout << "packet sent : " << filePackets[packetCounter].seqno<< endl;
-                    send_packet(filePackets[packetCounter]);
-                }else {
-                    cout<<"packet dropped"<<endl;
-                }
-                timeout = recieve_ack_packet();
-            }
+			bool timeout = true;
+			while (timeout) {
+				float propToSend = dis(gen);
+				//cout<<"propToSend : "<<propToSend<<endl;
+				if (propToSend > plp) {
+					cout << "packet sent : " << filePackets[packetCounter].seqno
+							<< endl;
+					send_packet(filePackets[packetCounter]);
+				} else {
+					cout << "packet dropped" << endl;
+				}
+				timeout = recieve_ack_packet();
+			}
 			packetCounter++;
 		}
 		cout << "cwinSIZE is " << cwnSize << endl;
@@ -196,7 +179,8 @@ void send_file_stop_and_wait() {
 		} else {
 			cwnSize += 1;
 		}
-		if (cwnSize >= ssthreshold) state = 1;
+		if (cwnSize >= ssthreshold)
+			state = 1;
 	}
 	cout << "Finished sending file " << endl;
 }
@@ -223,7 +207,7 @@ void create_file_packets(char *path) {
 	int numbytes;
 	struct packet file_packet;
 	fileptr = fopen(path, "rb");  // Open the file in binary mode
-    cout<<"iam here and fileptr is : "<<fileptr<<endl;
+	cout << "iam here and fileptr is : " << fileptr << endl;
 	fseek(fileptr, 0, SEEK_END);          // Jump to the end of the file
 	filelen = ftell(fileptr);         // Get the current byte offset in the file
 	rewind(fileptr);
@@ -252,7 +236,7 @@ packet create_packet(char data[], int size) {
 
 void send_packet(struct packet sent_packet) {
 	int numbytes;
-	if ((numbytes = sendto(sockfd, &sent_packet, sizeof(sent_packet), 0,
+	if ((numbytes = sendto(clientsock, &sent_packet, sizeof(sent_packet), 0,
 			(struct sockaddr*) &g_their_addr, g_addr_len)) == -1) {
 		perror("talker: sendto");
 		exit(1);
@@ -260,22 +244,22 @@ void send_packet(struct packet sent_packet) {
 }
 
 bool recieve_ack_packet() {
-    struct ack_packet received_ack;
+	struct ack_packet received_ack;
 
-    //auto start = std::chrono::system_clock::now();
-    //while (std::chrono::duration<double>(std::chrono::system_clock::now() - start) < std::chrono::duration<double>(TimeToWaitForPacket)) {
-    struct pollfd pfd = {.fd = sockfd, .events = POLLIN};
-    int state = poll(&pfd, 1, TimeToWaitForPacket*1000);
-    recvfrom(sockfd, &received_ack, MAXBUFLEN, 0,
-    (struct sockaddr *) &g_their_addr, &g_addr_len);
-    /*if (numbytes  == -1) {
-        perror("recvfrom");
-        exit(1);
-    }*/
+	//auto start = std::chrono::system_clock::now();
+	//while (std::chrono::duration<double>(std::chrono::system_clock::now() - start) < std::chrono::duration<double>(TimeToWaitForPacket)) {
+	struct pollfd pfd = { .fd = clientsock, .events = POLLIN };
+	int state = poll(&pfd, 1, TimeToWaitForPacket * 1000);
+	recvfrom(clientsock, &received_ack, MAXBUFLEN, 0,
+			(struct sockaddr*) &g_their_addr, &g_addr_len);
+	/*if (numbytes  == -1) {
+	 perror("recvfrom");
+	 exit(1);
+	 }*/
 
-    if (state != 0){
-        cout << "Ack recived : " << received_ack.ackno << endl;
-        return false;
-    }
-    return true;
+	if (state != 0) {
+		cout << "Ack recived : " << received_ack.ackno << endl;
+		return false;
+	}
+	return true;
 }

@@ -45,40 +45,32 @@ int main(void) {
 	char argv[3][1024];
 	char path[] = "input.in";
 	read_input_file(path, argv);
+	struct sockaddr_in server;
+
 	/*	int sockfd;*/
 	g_addr_len = sizeof g_their_addr;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	int numbytes;
+	int port = htons(atoi(argv[1]));
 
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_INET6; // set to AF_INET to use IPv4
-	hints.ai_socktype = SOCK_DGRAM;
-
-	if ((rv = getaddrinfo(argv[0], argv[1], &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-		return 1;
+	/* Create a datagram socket in the internet domain and use the
+	 * default protocol (UDP).
+	 */
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+		perror("socket()");
+		exit(1);
 	}
 
-	// loop through all the results and make a socket
-	for (p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
-				== -1) {
-			perror("talker: socket");
-			continue;
-		}
+	/* Set up the server name */
+	server.sin_family = AF_INET; /* Internet Domain    */
+	server.sin_port = port; /* Server Port        */
+	server.sin_addr.s_addr = inet_addr("127.0.0.1"); /* Server's Address   */
 
-		break;
-	}
-
-	if (p == NULL) {
-		fprintf(stderr, "talker: failed to create socket\n");
-		return 2;
-	}
 	struct packet file = create_packet(argv[2]);
 
-	if ((numbytes = sendto(sockfd, &file, sizeof(file), 0, p->ai_addr,
-			p->ai_addrlen)) == -1) {
+	if ((numbytes = sendto(sockfd, &file, sizeof(file), 0,
+			(struct sockaddr*) &server, sizeof(server))) == -1) {
 		perror("talker: sendto");
 		exit(1);
 	}
@@ -190,7 +182,7 @@ void get_file_name(char *path, char *file_name) {
 		strcpy(parsed[i], token);
 		i++;
 	}
-    cout<<"last element is : "<<parsed[i-1]<<endl;
+	cout << "last element is : " << parsed[i - 1] << endl;
 	strcpy(file_name, parsed[i - 1]);
 }
 
