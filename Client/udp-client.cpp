@@ -18,8 +18,10 @@ using namespace std;
 char host[] = "localhost";
 char server_port[] = "4950";
 int sockfd;
+
 struct sockaddr_storage g_their_addr;
 socklen_t g_addr_len;
+
 struct packet {
 	uint16_t check_sum;
 	uint16_t len;
@@ -145,29 +147,12 @@ void receive_file(char *file) {
 		cout << "sent Ack packet no : " << ackPacket.ackno << "\n";
 	}
 	/*here you should write received_packets to file*/
-
 	FILE *recievedFile = fopen(file, "wb");
 	for (int i = 0; i < n - 1; i++) {
-		/*const char *c = received_packets[i].c_str();*/
 		fwrite(received_packets[i].data, sizeof(char),
 				received_packets[i].len - 8, recievedFile);
 	}
-
 	fclose(recievedFile);
-	/*	ofstream wf(file, ios::out | ios::binary);
-	 if (!wf.is_open()) {
-	 cout << "error" << endl;
-	 return;
-	 }
-	 for (int i = 0; i < n - 1; i++) {
-	 // If strings are null-terminated use +1 to separate them in file
-	 const char *c = ;
-	 wf.write(c, 500);
-	 my_file.write(&received_packets[i], received_packets[i].length());
-	 // If strings aren't null-terminated write a null symbol after string
-	 // my_file.write("\0", 1);
-	 }
-	 wf.close();*/
 	printf("Finished reading\n");
 	fflush(stdout);
 }
@@ -195,6 +180,7 @@ ack_packet create_Ack_packet(int ack_no) {
 
 void send_ack(ack_packet ackPacket) {
 	int numbytes;
+	ackPacket.len = 8;
 	if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
 			(struct sockaddr*) &g_their_addr, g_addr_len)) == -1) {
 		perror("talker: sendto");
