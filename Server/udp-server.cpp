@@ -135,8 +135,8 @@ int main(void) {
 			} else {
 				cout << "congestion_control_selective \n" << "\n";
 				struct timeval timeout;
-				timeout.tv_sec = 1;
-				timeout.tv_usec = 0;
+				timeout.tv_sec = 0;
+				timeout.tv_usec = 1000;
 				if (setsockopt(clientsock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
 						sizeof(timeout)) < 0) {
 					perror("failed allowing server socket to reuse address");
@@ -308,11 +308,7 @@ void congestion_control_selective() {
 				packetsTimer[ack.ackno].numberOfAcks++;
 				if (packetsTimer[ack.ackno].numberOfAcks == 1) {
 					received_acks++;
-					if (s == slow_start) {
-
-					} else if (s == congestion_avoidance) {
-
-					} else {
+					if (s == fast_recovery) {
 						s = congestion_avoidance;
 					}
 					cwnSize += 1;
@@ -328,8 +324,6 @@ void congestion_control_selective() {
 						ssthreshold = cwnSize / 2;
 						cwnSize = ssthreshold + 3;
 						s = fast_recovery;
-					} else {
-
 					}
 					packetsTimer[ack.ackno].numberOfAcks = 0;
 					send_packet(filePackets[packetsTimer[ack_counter].seqno]);
@@ -337,8 +331,7 @@ void congestion_control_selective() {
 			} else {
 				chrono::duration<double> elapsed_time =
 						chrono::system_clock::now()
-								- packetsTimer[ack.ackno].sentAt;
-
+								- packetsTimer[ack_counter].sentAt;
 				if (packetsTimer[ack_counter].numberOfAcks == 0
 						&& (elapsed_time.count()) > 1) {
 					cout << "Time out packet num:  "
@@ -355,15 +348,12 @@ void congestion_control_selective() {
 
 		}
 		total_acks += received_acks;
-		/*cout << total_acks << "\n";
-		 cout << "cwinSIZE is " << cwnSize << endl;*/
 		if (cwnSize >= ssthreshold)
 			s = congestion_avoidance;
 
 		if (total_acks >= filePackets.size() - 1)
 			break;
 	}
-	/*send_packet(filePackets[filePackets.size() - 1]);*/
 	cout << "Finished sending file " << endl;
 }
 
