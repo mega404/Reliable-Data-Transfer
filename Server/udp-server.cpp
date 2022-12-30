@@ -32,6 +32,7 @@ struct packet {
 
 struct p_timer {
 	uint32_t seqno;
+	int numberOfAcks;
 	chrono::time_point<std::chrono::system_clock> sentAt;
 };
 
@@ -133,6 +134,13 @@ int main(void) {
 				send_file_stop_and_wait();
 			} else {
 				cout << "congestion_control_selective \n" << "\n";
+				struct timeval timeout;
+				timeout.tv_sec = 1;
+				timeout.tv_usec = 0;
+				if (setsockopt(clientsock, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+						sizeof(timeout)) < 0) {
+					perror("failed allowing server socket to reuse address");
+				}
 				congestion_control_selective();
 			}
 			exit(0);
@@ -262,19 +270,16 @@ void congestion_control_selective() {
 	p.seqno = filePackets.size();
 	send_packet(p);
 	int packetCounter = 0, sent_packets_num, ack_counter;
-	int acks[filePackets.size()];
 	int total_acks = 0;
 	state s = slow_start;
 	while (!finished) {
-
+		cout << cwnSize << "\n";
 		// Send packets to client and set timer for each one.
-		int remained_size = (filePackets.size() - packetCounter);
+		int remained_size = (filePackets.size() - 1 - packetCounter);
 		sent_packets_num = min(cwnSize, remained_size);
-		filePackets.clear();
-		packetsTimer.clear();
 		int begin = packetCounter;
 		for (int i = 0; i < sent_packets_num; i++) {
-			struct p_timer t = { (uint32_t) packetCounter,
+			struct p_timer t = { (uint32_t) packetCounter, 0,
 					chrono::system_clock::now() };
 			packetsTimer.push_back(t);
 			filePackets[packetCounter].seqno = packetCounter;
@@ -294,12 +299,14 @@ void congestion_control_selective() {
 		ack_counter = begin;
 		int received_acks = 0;
 		while (ack_counter < packetCounter) {
+			/*cout << received_acks << "\n";*/
+
 			if (received_acks == sent_packets_num)
 				break;
 			ack_packet ack = recieve_ack_packet();
-			if (ack.ackno == 0 && ack.check_sum == 0 && ack.len == 0) {
-				acks[ack.ackno]++;
-				if (acks[ack.ackno] == 1) {
+			if (ack.len != 0) {
+				packetsTimer[ack.ackno].numberOfAcks++;
+				if (packetsTimer[ack.ackno].numberOfAcks == 1) {
 					received_acks++;
 					if (s == slow_start) {
 
@@ -309,7 +316,7 @@ void congestion_control_selective() {
 						s = congestion_avoidance;
 					}
 					cwnSize += 1;
-				} else if (acks[ack.ackno] == 2) {
+				} else if (packetsTimer[ack.ackno].numberOfAcks == 2) {
 					received_acks--;
 				} else {
 					received_acks--;
@@ -324,20 +331,23 @@ void congestion_control_selective() {
 					} else {
 
 					}
-					acks[ack.ackno] = 0;
+					packetsTimer[ack.ackno].numberOfAcks = 0;
 					send_packet(filePackets[packetsTimer[ack_counter].seqno]);
 				}
-			}
-			chrono::duration<double> elapsed_time = chrono::system_clock::now()
-					- packetsTimer[ack.ackno].sentAt;
+			} else {
+				chrono::duration<double> elapsed_time =
+						chrono::system_clock::now()
+								- packetsTimer[ack.ackno].sentAt;
 
-			if (acks[ack_counter] == 0 && (elapsed_time.count()) > 2) {
-				cout << "Time out packet num:  "
-						<< packetsTimer[ack_counter].seqno << "\n";
-				ssthreshold = cwnSize / 2;
-				cwnSize = 1;
-				s = slow_start;
-				send_packet(filePackets[packetsTimer[ack_counter].seqno]);
+				if (packetsTimer[ack_counter].numberOfAcks == 0
+						&& (elapsed_time.count()) > 1) {
+					cout << "Time out packet num:  "
+							<< packetsTimer[ack_counter].seqno << "\n";
+					ssthreshold = cwnSize / 2;
+					cwnSize = 1;
+					s = slow_start;
+					send_packet(filePackets[packetsTimer[ack_counter].seqno]);
+				}
 			}
 			ack_counter++;
 			if (ack_counter == packetCounter)
@@ -345,13 +355,15 @@ void congestion_control_selective() {
 
 		}
 		total_acks += received_acks;
-		cout << "cwinSIZE is " << cwnSize << endl;
+		/*cout << total_acks << "\n";
+		 cout << "cwinSIZE is " << cwnSize << endl;*/
 		if (cwnSize >= ssthreshold)
 			s = congestion_avoidance;
 
 		if (total_acks >= filePackets.size() - 1)
 			break;
 	}
+	/*send_packet(filePackets[filePackets.size() - 1]);*/
 	cout << "Finished sending file " << endl;
 }
 

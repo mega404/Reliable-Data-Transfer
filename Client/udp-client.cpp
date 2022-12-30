@@ -130,9 +130,9 @@ void receive_file(char *file) {
 	packet received_packets[received_data.seqno - 1];
 	int n = received_data.seqno;
 	cout << "Num of packets will be received " << received_data.seqno << "\n";
-	int ack = 0;
+	int ack = 0, acks_number = 0;
 	while (1) {
-		if (received_data.len == 0)
+		if (acks_number == n - 1)
 			break;
 		if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
 				(struct sockaddr*) &g_their_addr, &g_addr_len)) == -1) {
@@ -144,6 +144,7 @@ void receive_file(char *file) {
 		ack = received_data.seqno;
 		ackPacket = create_Ack_packet(ack);
 		send_ack(ackPacket);
+		acks_number++;
 		cout << "sent Ack packet no : " << ackPacket.ackno << "\n";
 	}
 	/*here you should write received_packets to file*/
@@ -181,6 +182,7 @@ ack_packet create_Ack_packet(int ack_no) {
 void send_ack(ack_packet ackPacket) {
 	int numbytes;
 	ackPacket.len = 8;
+	ackPacket.check_sum = 1;
 	if ((numbytes = sendto(sockfd, &ackPacket, sizeof(ackPacket), 0,
 			(struct sockaddr*) &g_their_addr, g_addr_len)) == -1) {
 		perror("talker: sendto");
