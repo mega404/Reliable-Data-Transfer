@@ -19,7 +19,6 @@
 #include <sys/poll.h>
 
 using namespace std;
-#define MYPORT "4950"    // the port users will be connecting to
 #define MAXBUFLEN 509
 #define TimeToWaitForPacket 2
 
@@ -78,6 +77,7 @@ int main(void) {
 	struct sockaddr_in client, server;
 	int rv;
 	int numbytes;
+	int port = htons(atoi(argv[0]));
 	seed = stoi(argv[1]);
 	plp = stof(argv[2]);
 	cout << "plp is " << plp << endl;
@@ -92,7 +92,7 @@ int main(void) {
 
 	// Set port and IP:
 	server.sin_family = AF_INET;
-	server.sin_port = htons(4950);
+	server.sin_port = port;
 	server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
 	// Bind to the set port and IP:
@@ -142,6 +142,8 @@ int main(void) {
 					perror("failed allowing server socket to reuse address");
 				}
 				congestion_control_selective();
+				packetsTimer.clear();
+				filePackets.clear();
 			}
 			exit(0);
 		}
@@ -333,7 +335,7 @@ void congestion_control_selective() {
 						chrono::system_clock::now()
 								- packetsTimer[ack_counter].sentAt;
 				if (packetsTimer[ack_counter].numberOfAcks == 0
-						&& (elapsed_time.count()) > 1) {
+						&& (elapsed_time.count()) > 2) {
 					cout << "Time out packet num:  "
 							<< packetsTimer[ack_counter].seqno << "\n";
 					ssthreshold = cwnSize / 2;

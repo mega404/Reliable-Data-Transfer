@@ -21,7 +21,7 @@ int sockfd;
 
 struct sockaddr_storage g_their_addr;
 socklen_t g_addr_len;
-
+static char received_packets[100000][500];
 struct packet {
 	uint16_t check_sum;
 	uint16_t len;
@@ -127,10 +127,10 @@ void receive_file(char *file) {
 	// client will receive the last package as zero to stop
 	// this will be the last package in received_data[]
 	// write received_data[]  except the last one.
-	packet received_packets[received_data.seqno - 1];
-	int n = received_data.seqno;
 	cout << "Num of packets will be received " << received_data.seqno << "\n";
+	int n = received_data.seqno;
 	int ack = 0, acks_number = 0;
+	int length_of_last_packet;
 	while (1) {
 		if (acks_number == n - 1)
 			break;
@@ -139,19 +139,23 @@ void receive_file(char *file) {
 			perror("recvfrom");
 			exit(1);
 		}
-		received_packets[received_data.seqno] = received_data;
+		memcpy(received_packets[received_data.seqno], received_data.data,
+				received_data.len);
 		cout << "recieved packet no : " << received_data.seqno << "\n";
 		ack = received_data.seqno;
 		ackPacket = create_Ack_packet(ack);
 		send_ack(ackPacket);
 		acks_number++;
+		length_of_last_packet = received_data.len;
 		cout << "sent Ack packet no : " << ackPacket.ackno << "\n";
 	}
 	/*here you should write received_packets to file*/
 	FILE *recievedFile = fopen(file, "wb");
+	cout << length_of_last_packet << " \n";
 	for (int i = 0; i < n - 1; i++) {
-		fwrite(received_packets[i].data, sizeof(char),
-				received_packets[i].len - 8, recievedFile);
+		if (i == n - 2)
+			size = length_of_last_packet - 8;
+		cout << fwrite(&received_packets[i], sizeof(char), size, recievedFile);
 	}
 	fclose(recievedFile);
 	printf("Finished reading\n");
