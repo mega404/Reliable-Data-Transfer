@@ -193,6 +193,8 @@ void send_file_stop_and_wait() {
 		if (cwnSize >= ssthreshold)
 			s = congestion_avoidance;
 	}
+	struct packet file_packet = { 0, 0, 0, "" };
+	send_packet(file_packet);
 	cout << "Finished sending file " << endl;
 }
 
@@ -231,7 +233,7 @@ void create_file_packets(char *path) {
 	int numbytes;
 	struct packet file_packet;
 	fileptr = fopen(path, "rb");  // Open the file in binary mode
-	cout << "iam here and fileptr is : " << fileptr << endl;
+	/*	cout << "iam here and fileptr is : " << fileptr << endl;*/
 	fseek(fileptr, 0, SEEK_END);          // Jump to the end of the file
 	filelen = ftell(fileptr);         // Get the current byte offset in the file
 	rewind(fileptr);
@@ -241,8 +243,6 @@ void create_file_packets(char *path) {
 		file_packet = create_packet(send_buffer, nb);
 		filePackets.push_back(file_packet);
 	}
-//	file_packet = { 0, 0, 0, "" };
-//	filePackets.push_back(file_packet);
 	return;
 }
 
@@ -262,6 +262,19 @@ void send_packet(struct packet sent_packet) {
 	}
 }
 
+ack_packet recieve_ack_packet() {
+	struct ack_packet received_ack;
+	struct pollfd pfd = { .fd = clientsock, .events = POLLIN };
+	int state = poll(&pfd, 1, 1);
+	recvfrom(clientsock, &received_ack, MAXBUFLEN, 0,
+			(struct sockaddr*) &g_their_addr, &g_addr_len);
+	if (state != 0) {
+		cout << "Ack recived : " << received_ack.ackno << endl;
+		return received_ack;
+	}
+	return empty_ack;
+}
+
 void congestion_control_selective() {
 	uniform_real_distribution<> dis(0, 1);
 	mt19937 gen(seed);
@@ -269,8 +282,7 @@ void congestion_control_selective() {
 	bool finished = false;
 	// This packet contains number of packets will the
 	// Client receive
-	ofstream myfile;
-/*	myfile.open("5.txt");*/
+	ofstream myfile("filename.txt");
 	packet p = create_packet(empty, 0);
 	p.seqno = filePackets.size();
 	send_packet(p);
@@ -289,7 +301,7 @@ void congestion_control_selective() {
 			packetsTimer.push_back(t);
 			filePackets[packetCounter].seqno = packetCounter;
 			float propToSend = dis(gen);
-			if (propToSend > plp) {
+			if (propToSend >= plp) {
 				cout << "packet sent : " << filePackets[packetCounter].seqno
 						<< endl;
 				send_packet(filePackets[packetCounter]);
@@ -314,13 +326,13 @@ void congestion_control_selective() {
 				packetsTimer[ack.ackno].numberOfAcks++;
 				received_acks++;
 				if (packetsTimer[ack.ackno].numberOfAcks == 1) {
-
 					if (s == fast_recovery) {
 						s = congestion_avoidance;
+					} else if (s == congestion_avoidance) {
+						cwnSize = cwnSize + 1;
+					} else {
+						cwnSize += 1;
 					}
-					cwnSize += 1;
-				} else if (packetsTimer[ack.ackno].numberOfAcks == 2) {
-					/*					received_acks--;*/
 				} else {
 					/*					received_acks--;*/
 					if (s == slow_start) {
@@ -340,7 +352,7 @@ void congestion_control_selective() {
 						chrono::system_clock::now()
 								- packetsTimer[ack_counter].sentAt;
 				if (packetsTimer[ack_counter].numberOfAcks == 0
-						&& (elapsed_time.count()) > 2) {
+						&& (elapsed_time.count()) > 1) {
 					cout << "Time out packet num:  "
 							<< packetsTimer[ack_counter].seqno << "\n";
 					ssthreshold = cwnSize / 2;
@@ -358,7 +370,7 @@ void congestion_control_selective() {
 		total_acks += received_acks;
 		cwnSize = prevcwn;
 		ssthreshold = prevssthreshold;
-/*		myfile << cwnSize << "\n";*/
+		myfile << cwnSize << endl;
 		if (cwnSize >= ssthreshold)
 			s = congestion_avoidance;
 
@@ -379,19 +391,7 @@ void congestion_control_selective() {
 	}
 	struct packet file_packet = { 0, 0, 0, "" };
 	send_packet(file_packet);
-/*	myfile.close();*/
+	myfile.close();
 	cout << "Finished sending file " << endl;
 }
 
-ack_packet recieve_ack_packet() {
-	struct ack_packet received_ack;
-	struct pollfd pfd = { .fd = clientsock, .events = POLLIN };
-	int state = poll(&pfd, 1, 1);
-	recvfrom(clientsock, &received_ack, MAXBUFLEN, 0,
-			(struct sockaddr*) &g_their_addr, &g_addr_len);
-	if (state != 0) {
-		cout << "Ack recived : " << received_ack.ackno << endl;
-		return received_ack;
-	}
-	return empty_ack;
-}

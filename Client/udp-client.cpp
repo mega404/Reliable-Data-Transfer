@@ -15,8 +15,6 @@
 using namespace std;
 
 #define MAXBUFLEN 508
-char host[] = "localhost";
-char server_port[] = "4950";
 int sockfd;
 
 struct sockaddr_storage g_their_addr;
@@ -122,11 +120,6 @@ void receive_file(char *file) {
 		exit(1);
 	}
 
-	// This array to hold packets in place according to packet seqno
-	// 					Important
-	// client will receive the last package as zero to stop
-	// this will be the last package in received_data[]
-	// write received_data[]  except the last one.
 	cout << "Num of packets will be received " << received_data.seqno << "\n";
 	int n = received_data.seqno;
 	int ack = 0, acks_number = 0;
@@ -140,8 +133,6 @@ void receive_file(char *file) {
 		if (received_data.len == 0)
 			break;
 		received_packets[received_data.seqno] = received_data;
-		/*		memcpy(received_packets[received_data.seqno], received_data.data,
-		 received_data.len);*/
 		cout << "recieved packet no : " << received_data.seqno << "\n";
 		ack = received_data.seqno;
 		ackPacket = create_Ack_packet(ack);
@@ -152,7 +143,6 @@ void receive_file(char *file) {
 	}
 	/*here you should write received_packets to file*/
 	FILE *recievedFile = fopen(file, "wb");
-	cout << length_of_last_packet << " \n";
 	for (int i = 0; i < n; i++) {
 		fwrite(received_packets[i].data, sizeof(char),
 				received_packets[i].len - 8, recievedFile);
