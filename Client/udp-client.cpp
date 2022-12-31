@@ -21,7 +21,6 @@ int sockfd;
 
 struct sockaddr_storage g_their_addr;
 socklen_t g_addr_len;
-static char received_packets[100000][500];
 struct packet {
 	uint16_t check_sum;
 	uint16_t len;
@@ -34,6 +33,7 @@ struct ack_packet {
 	uint16_t len;
 	uint32_t ackno;
 };
+static packet received_packets[10000000];
 
 void read_input_file(char *path, char args[][1024]);
 packet create_packet(char *data);
@@ -132,15 +132,16 @@ void receive_file(char *file) {
 	int ack = 0, acks_number = 0;
 	int length_of_last_packet;
 	while (1) {
-		if (acks_number == n - 1)
-			break;
 		if ((numbytes = recvfrom(sockfd, &received_data, MAXBUFLEN, 0,
 				(struct sockaddr*) &g_their_addr, &g_addr_len)) == -1) {
 			perror("recvfrom");
 			exit(1);
 		}
-		memcpy(received_packets[received_data.seqno], received_data.data,
-				received_data.len);
+		if (received_data.len == 0)
+			break;
+		received_packets[received_data.seqno] = received_data;
+		/*		memcpy(received_packets[received_data.seqno], received_data.data,
+		 received_data.len);*/
 		cout << "recieved packet no : " << received_data.seqno << "\n";
 		ack = received_data.seqno;
 		ackPacket = create_Ack_packet(ack);
@@ -152,10 +153,9 @@ void receive_file(char *file) {
 	/*here you should write received_packets to file*/
 	FILE *recievedFile = fopen(file, "wb");
 	cout << length_of_last_packet << " \n";
-	for (int i = 0; i < n - 1; i++) {
-		if (i == n - 2)
-			size = length_of_last_packet - 8;
-		cout << fwrite(&received_packets[i], sizeof(char), size, recievedFile);
+	for (int i = 0; i < n; i++) {
+		fwrite(received_packets[i].data, sizeof(char),
+				received_packets[i].len - 8, recievedFile);
 	}
 	fclose(recievedFile);
 	printf("Finished reading\n");

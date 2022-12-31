@@ -17,6 +17,7 @@
 #include <sstream>
 #include <chrono>
 #include <sys/poll.h>
+#include <fstream>
 
 using namespace std;
 #define MAXBUFLEN 509
@@ -240,8 +241,8 @@ void create_file_packets(char *path) {
 		file_packet = create_packet(send_buffer, nb);
 		filePackets.push_back(file_packet);
 	}
-	file_packet = { 0, 0, 0, "" };
-	filePackets.push_back(file_packet);
+//	file_packet = { 0, 0, 0, "" };
+//	filePackets.push_back(file_packet);
 	return;
 }
 
@@ -268,6 +269,8 @@ void congestion_control_selective() {
 	bool finished = false;
 	// This packet contains number of packets will the
 	// Client receive
+	ofstream myfile;
+/*	myfile.open("5.txt");*/
 	packet p = create_packet(empty, 0);
 	p.seqno = filePackets.size();
 	send_packet(p);
@@ -275,9 +278,9 @@ void congestion_control_selective() {
 	int total_acks = 0;
 	state s = slow_start;
 	while (!finished) {
-		cout << cwnSize << "\n";
+		/*cout << cwnSize << "\n";*/
 		// Send packets to client and set timer for each one.
-		int remained_size = (filePackets.size() - 1 - packetCounter);
+		int remained_size = (filePackets.size() - packetCounter);
 		sent_packets_num = min(cwnSize, remained_size);
 		int begin = packetCounter;
 		for (int i = 0; i < sent_packets_num; i++) {
@@ -300,24 +303,26 @@ void congestion_control_selective() {
 		// receive Acks from client
 		ack_counter = begin;
 		int received_acks = 0;
+		bool timeout = false;
+		int prevcwn = cwnSize, prevssthreshold = ssthreshold;
 		while (ack_counter < packetCounter) {
-			/*cout << received_acks << "\n";*/
 
 			if (received_acks == sent_packets_num)
 				break;
 			ack_packet ack = recieve_ack_packet();
 			if (ack.len != 0) {
 				packetsTimer[ack.ackno].numberOfAcks++;
+				received_acks++;
 				if (packetsTimer[ack.ackno].numberOfAcks == 1) {
-					received_acks++;
+
 					if (s == fast_recovery) {
 						s = congestion_avoidance;
 					}
 					cwnSize += 1;
 				} else if (packetsTimer[ack.ackno].numberOfAcks == 2) {
-					received_acks--;
+					/*					received_acks--;*/
 				} else {
-					received_acks--;
+					/*					received_acks--;*/
 					if (s == slow_start) {
 						ssthreshold = cwnSize / 2;
 						cwnSize = ssthreshold + 3;
@@ -341,6 +346,7 @@ void congestion_control_selective() {
 					ssthreshold = cwnSize / 2;
 					cwnSize = 1;
 					s = slow_start;
+					timeout = true;
 					send_packet(filePackets[packetsTimer[ack_counter].seqno]);
 				}
 			}
@@ -350,12 +356,30 @@ void congestion_control_selective() {
 
 		}
 		total_acks += received_acks;
+		cwnSize = prevcwn;
+		ssthreshold = prevssthreshold;
+/*		myfile << cwnSize << "\n";*/
 		if (cwnSize >= ssthreshold)
 			s = congestion_avoidance;
+
+		if (timeout) {
+			ssthreshold = prevcwn / 2;
+			cwnSize = 1;
+		} else if (cwnSize >= prevssthreshold) {
+			cwnSize += 1;
+
+		} else if (cwnSize < prevssthreshold) {
+			cwnSize *= 2;
+		}
+		cout << "window size : " << cwnSize << " threshold: " << ssthreshold
+				<< "\n";
 
 		if (total_acks >= filePackets.size() - 1)
 			break;
 	}
+	struct packet file_packet = { 0, 0, 0, "" };
+	send_packet(file_packet);
+/*	myfile.close();*/
 	cout << "Finished sending file " << endl;
 }
 
@@ -371,4 +395,3 @@ ack_packet recieve_ack_packet() {
 	}
 	return empty_ack;
 }
-
